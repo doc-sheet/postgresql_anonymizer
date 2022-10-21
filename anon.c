@@ -6,6 +6,7 @@
 
 #include "postgres.h"
 #include "commands/seclabel.h"
+#include "parser/analyze.h"
 #include "parser/parser.h"
 #include "utils/builtins.h"
 #include "fmgr.h"
@@ -14,13 +15,24 @@
 #include "catalog/pg_database.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_authid.h"
+#include "utils/acl.h"
+#include "utils/queryjumble.h"
+#include "utils/varlena.h"
 #include "miscadmin.h"
 
+
 PG_MODULE_MAGIC;
+
+/* Saved hook values in case of unload */
+static post_parse_analyze_hook_type prev_post_parse_analyze_hook = NULL;
 
 /*
  * Declarations
  */
+PGDLLEXPORT void    _PG_init(void);
+PGDLLEXPORT void    _PG_fini(void);
+PGDLLEXPORT Datum   get_masking_policy(PG_FUNCTION_ARGS);
+
 #ifdef _WIN64
 PGDLLEXPORT void    _PG_init(void);
 PGDLLEXPORT Datum   get_function_schema(PG_FUNCTION_ARGS);
@@ -33,8 +45,12 @@ Datum   register_label(PG_FUNCTION_ARGS);
 
 
 PG_FUNCTION_INFO_V1(get_function_schema);
+PG_FUNCTION_INFO_V1(anon_get_masking_policy);
 PG_FUNCTION_INFO_V1(register_label);
 
+/*
+ * GUC Variables
+ */
 static bool guc_anon_restrict_to_trusted_schemas;
 // Some GUC vars below are not used in the C code
 // but they are used in the plpgsql code
@@ -45,7 +61,20 @@ static char *guc_anon_mask_schema;
 static bool guc_anon_privacy_by_default;
 static char *guc_anon_salt;
 static char *guc_anon_source_schema;
+static bool guc_anon_transparent_dynamic_masking;
 
+/*
+ * Internal Functions
+ */
+static char * pa_get_masking_policy_for_role(Oid roleid);
+static bool pa_has_mask_in_policy(Oid roleid, char *policy);
+static void pa_rewrite(Query * query, char * policy);
+static void pa_guc_assign_masking_policies_hook(const char *newVal, void *extra);
+#if PG_VERSION_NUM < 140000
+static void pa_post_parse_analyze_hook(ParseState *pstate, Query *query);
+#else
+static void pa_post_parse_analyze_hook(ParseState *pstate, Query *query, JumbleState *jstate);
+#endif
 
 /*
  * Checking the syntax of the masking rules
@@ -133,7 +162,7 @@ anon_object_relabel(const ObjectAddress *object, const char *seclabel)
     default:
       ereport(ERROR,
           (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-           errmsg("anon provider does not support labels on this object")));
+           errmsg("The anon extension does not support labels on this object")));
       break;
   }
 
@@ -184,11 +213,11 @@ _PG_init(void)
     "Define multiple masking policies (NOT IMPLEMENTED YET)",
     "",
     &guc_anon_masking_policies,
-    "",
-    PGC_SIGHUP,
-    GUC_SUPERUSER_ONLY,
+    "anon",
+    PGC_SUSET,
+    GUC_LIST_INPUT | GUC_SUPERUSER_ONLY,
     NULL,
-    NULL,
+    pa_guc_assign_masking_policies_hook,
     NULL
   );
 
@@ -262,20 +291,33 @@ _PG_init(void)
     NULL
   );
 
-  /* Security label provider hook */
-  /* 'anon' is always used as the default policy */
-  register_label_provider("anon",anon_object_relabel);
-  /* Additional providers for multiple masking policies */
-  if (strlen(guc_anon_masking_policies)>0)
-  {
-    char * policy = strtok(guc_anon_masking_policies, ",");
-    while( policy != NULL )
-    {
-      remove_spaces(policy);
-      register_label_provider(policy,anon_object_relabel);
-      policy = strtok(NULL, ",");
-    }
-  }
+  DefineCustomBoolVariable
+  (
+    "anon.transparent_dynamic_masking",
+    "New masking engine (EXPERIMENTAL)",
+    "",
+    &guc_anon_transparent_dynamic_masking,
+    false,
+    PGC_SUSET,
+    0,
+    NULL,
+    NULL,
+    NULL
+  );
+
+  /*
+   * Install hook
+   */
+  prev_post_parse_analyze_hook = post_parse_analyze_hook;
+  post_parse_analyze_hook = pa_post_parse_analyze_hook;
+}
+
+/*
+ * Unregister and restore the hook
+ */
+void
+_PG_fini(void) {
+  post_parse_analyze_hook = prev_post_parse_analyze_hook;
 }
 
 /*
@@ -337,6 +379,109 @@ get_function_schema(PG_FUNCTION_ARGS)
     }
 
     PG_RETURN_TEXT_P(cstring_to_text(""));
+}
+
+static void
+pa_guc_assign_masking_policies_hook(const char *newval, void *extra)
+{
+  List *      masking_policies;
+  ListCell *  c;
+  char *      dup = pstrdup(newval);
+
+  ereport(LOG, (errmsg("pa_guc_assign_masking_policies_hook")));
+
+  SplitGUCList(dup, ',', &masking_policies);
+  foreach(c,masking_policies)
+  {
+    char  * policy = (char *) lfirst(c);
+    register_label_provider(policy,anon_object_relabel);
+  }
+}
+
+static bool
+pa_has_mask_in_policy(Oid roleid, char *policy)
+{
+  ObjectAddress role;
+  char * seclabel = NULL;
+
+  ObjectAddressSet(role, AuthIdRelationId, roleid);
+  seclabel = GetSecurityLabel(&role, policy);
+  return (!seclabel || strcmp(seclabel, "MASKED") != 0);
+}
+
+/*
+ * https://github.com/fmbiete/pgdisablelogerror/blob/main/disablelogerror.c
+ */
+static char *
+pa_get_masking_policy(Oid roleid)
+{
+  ListCell   * r;
+  char * policy = NULL;
+
+  policy=pa_get_masking_policy_for_role(roleid);
+  if (policy) return policy;
+
+//  is_member_of_role(0,0);
+//  foreach(r,roles_is_member_of(roleid,1,InvalidOid, NULL))
+//  {
+//    policy=pa_get_masking_policy_for_role(lfirst_oid(r));
+//    if (policy) return policy;
+//  }
+
+  /* No masking policy found */
+  return NULL;
+}
+
+static char *
+pa_get_masking_policy_for_role(Oid roleid)
+{
+  List *      masking_policies;
+  ListCell *  c;
+  char *      dup = pstrdup(guc_anon_masking_policies);
+
+  SplitGUCList(dup, ',', &masking_policies);
+  foreach(c,masking_policies)
+  {
+    char  * policy = (char *) lfirst(c);
+    if (pa_has_mask_in_policy(roleid,policy))
+      return policy;
+  }
+
+  return NULL;
+}
+
+
+/*
+ * Post-parse-analysis hook: mask query
+ * https://github.com/taminomara/psql-hooks/blob/master/Detailed.md#post_parse_analyze_hook
+ */
+static void
+#if PG_VERSION_NUM < 140000
+pa_post_parse_analyze_hook(ParseState *pstate, Query *query)
+#else
+pa_post_parse_analyze_hook(ParseState *pstate, Query *query, JumbleState *jstate)
+#endif
+{
+  char * policy = pa_get_masking_policy(GetUserId());
+
+  if (prev_post_parse_analyze_hook)
+    prev_post_parse_analyze_hook(pstate, query, jstate);
+
+  if (!guc_anon_transparent_dynamic_masking)
+    return;
+
+  if (policy)
+    pa_rewrite(query,policy);
+
+  return;
+}
+
+static void
+pa_rewrite(Query * query, char * policy)
+{
+      ereport(ERROR,
+        (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+        errmsg("NOT IMPLEMENTED YET")));
 }
 
 Datum
