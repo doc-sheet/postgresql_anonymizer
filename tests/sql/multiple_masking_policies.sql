@@ -5,6 +5,8 @@ BEGIN;
 
 CREATE EXTENSION anon CASCADE;
 
+SET anon.masking_policies = 'anon, rgpd';
+
 -- ALTER SYSTEM requires to restart the instance for the change to take effect
 -- So we force the registration
 SELECT anon.register_masking_policy('gdpr');

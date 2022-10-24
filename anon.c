@@ -1,58 +1,109 @@
 /*
- * This comes directly from the dummy_seclabel example
- * see https://github.com/postgres/postgres/blob/master/src/test/modules/dummy_seclabel/dummy_seclabel.c
+ * PostgreSQL Anonymizer
  *
  */
 
 #include "postgres.h"
+
+#if PG_VERSION_NUM >= 120000
+#include "access/relation.h"
+#include "access/table.h"
+#else
+#include "access/heapam.h"
+#include "access/htup_details.h"
+#endif
+
 #include "commands/seclabel.h"
+#include "parser/analyze.h"
 #include "parser/parser.h"
-#include "utils/builtins.h"
 #include "fmgr.h"
-#include "utils/guc.h"
+#include "catalog/pg_attrdef.h"
+#if PG_VERSION_NUM >= 110000
+#include "catalog/pg_attrdef_d.h"
+#endif
+#include "catalog/pg_authid.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_database.h"
 #include "catalog/pg_namespace.h"
-#include "catalog/pg_authid.h"
 #include "miscadmin.h"
+#include "utils/acl.h"
+#include "utils/builtins.h"
+#include "utils/guc.h"
+#include "utils/lsyscache.h"
+#include "utils/queryjumble.h"
+#include "utils/rel.h"
+#include "utils/ruleutils.h"
+#include "utils/varlena.h"
+
 
 PG_MODULE_MAGIC;
 
+/* Saved hook values in case of unload */
+static post_parse_analyze_hook_type prev_post_parse_analyze_hook = NULL;
+
 /*
- * Declarations
+ * External Functions
  */
-#ifdef _WIN64
+PGDLLEXPORT Datum   anon_get_function_schema(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum   anon_masking_expressions_for_table(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum   anon_masking_value_for_column(PG_FUNCTION_ARGS);
 PGDLLEXPORT void    _PG_init(void);
-PGDLLEXPORT Datum   get_function_schema(PG_FUNCTION_ARGS);
-PGDLLEXPORT Datum   register_label(PG_FUNCTION_ARGS);
-#else
-void    _PG_init(void);
-Datum   get_function_schema(PG_FUNCTION_ARGS);
-Datum   register_label(PG_FUNCTION_ARGS);
-#endif
+PGDLLEXPORT void    _PG_fini(void);
+PGDLLEXPORT Datum   get_masking_policy(PG_FUNCTION_ARGS);
 
-
+PG_FUNCTION_INFO_V1(anon_get_function_schema);
+PG_FUNCTION_INFO_V1(anon_masking_expressions_for_table);
+PG_FUNCTION_INFO_V1(anon_masking_value_for_column);
 PG_FUNCTION_INFO_V1(get_function_schema);
+PG_FUNCTION_INFO_V1(anon_get_masking_policy);
 PG_FUNCTION_INFO_V1(register_label);
 
-static bool guc_anon_restrict_to_trusted_schemas;
+/*
+ * Internal functions
+ */
+static char * pa_cast_as_regtype(char * value, int atttypid);
+static char * pa_masking_value_for_att(Relation rel, FormData_pg_attribute * att, char * policy);
+
+/*
+ * GUC Parameters
+ */
+
+static char * guc_anon_k_anonymity_provider;
+static char * guc_anon_masking_policies;
+static bool   guc_anon_privacy_by_default;
+static bool   guc_anon_restrict_to_trusted_schemas;
+static bool   guc_anon_strict_mode;
+
 // Some GUC vars below are not used in the C code
 // but they are used in the plpgsql code
 // compile with `-Wno-unused-variable` to avoid warnings
 static char *guc_anon_algorithm;
-static char *guc_anon_k_anonymity_provider;
-static char *guc_anon_masking_policies;
 static char *guc_anon_mask_schema;
-static bool guc_anon_privacy_by_default;
 static char *guc_anon_salt;
 static char *guc_anon_source_schema;
+static bool guc_anon_transparent_dynamic_masking;
 
+/*
+ * Internal Functions
+ */
+static void   pa_assign_masking_policies();
+static bool   pa_check_masking_policies(char **newval, void **extra, GucSource source);
+static char * pa_get_masking_policy_for_role(Oid roleid);
+static void   pa_masking_policy_object_relabel(const ObjectAddress *object, const char *seclabel);
+static bool   pa_has_mask_in_policy(Oid roleid, char *policy);
+static void   pa_rewrite(Query * query, char * policy);
+
+#if PG_VERSION_NUM < 140000
+static void   pa_post_parse_analyze_hook(ParseState *pstate, Query *query);
+#else
+static void   pa_post_parse_analyze_hook(ParseState *pstate, Query *query, JumbleState *jstate);
+#endif
 
 /*
  * Checking the syntax of the masking rules
  */
 static void
-anon_object_relabel(const ObjectAddress *object, const char *seclabel)
+pa_masking_policy_object_relabel(const ObjectAddress *object, const char *seclabel)
 {
   char *checksemicolon;
 
@@ -95,6 +146,7 @@ anon_object_relabel(const ObjectAddress *object, const char *seclabel)
       /* SECURITY LABEL FOR anon ON COLUMN t.i IS 'MASKED WITH VALUE $x$' */
       if ( pg_strncasecmp(seclabel, "MASKED WITH FUNCTION", 20) == 0
         || pg_strncasecmp(seclabel, "MASKED WITH VALUE", 17) == 0
+        || pg_strncasecmp(seclabel, "NOT MASKED", 10) == 0
       )
         return;
 
@@ -132,7 +184,7 @@ anon_object_relabel(const ObjectAddress *object, const char *seclabel)
     default:
       ereport(ERROR,
           (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-           errmsg("anon provider does not support labels on this object")));
+           errmsg("The anon extension does not support labels on this object")));
       break;
   }
 
@@ -145,7 +197,7 @@ anon_object_relabel(const ObjectAddress *object, const char *seclabel)
  * Checking the syntax of the k-anonymity declarations
  */
 static void
-anon_k_anonymity_object_relabel(const ObjectAddress *object, const char *seclabel)
+pa_k_anonymity_object_relabel(const ObjectAddress *object, const char *seclabel)
 {
   switch (object->classId)
   {
@@ -173,21 +225,6 @@ anon_k_anonymity_object_relabel(const ObjectAddress *object, const char *seclabe
   ereport(ERROR,
       (errcode(ERRCODE_INVALID_NAME),
        errmsg("'%s' is not a valid label", seclabel)));
-}
-
-/*
- * Trim whitespaces from a string
- */
-static void
-remove_spaces(char *s)
-{
-    int writer = 0, reader = 0;
-    while (s[reader])
-    {
-        if (s[reader]!=' ') s[writer++] = s[reader];
-        reader++;
-    }
-    s[writer]=0;
 }
 
 /*
@@ -231,10 +268,10 @@ _PG_init(void)
     "Define multiple masking policies (NOT IMPLEMENTED YET)",
     "",
     &guc_anon_masking_policies,
-    "",
-    PGC_SIGHUP,
-    GUC_SUPERUSER_ONLY,
-    NULL,
+    "anon",
+    PGC_SUSET,
+    GUC_LIST_INPUT | GUC_SUPERUSER_ONLY,
+    pa_check_masking_policies,
     NULL,
     NULL
   );
@@ -309,29 +346,70 @@ _PG_init(void)
     NULL
   );
 
-  // Provider for k-anonimity
-  register_label_provider(guc_anon_k_anonymity_provider,
-                          anon_k_anonymity_object_relabel
+  DefineCustomBoolVariable
+  (
+    "anon.strict_mode",
+    "A masking rule cannot change a column data type, unless you disable this",
+    "Disabling the mode is not recommended",
+    &guc_anon_strict_mode,
+    true,
+    PGC_SUSET,
+    0,
+    NULL,
+    NULL,
+    NULL
   );
 
-  /* Security label provider hook */
-  /* 'anon' is always used as the default policy */
-  register_label_provider("anon",anon_object_relabel);
-  /* Additional providers for multiple masking policies */
-  if (strlen(guc_anon_masking_policies)>0)
-  {
-    char * policy = strtok(guc_anon_masking_policies, ",");
-    while( policy != NULL )
-    {
-      remove_spaces(policy);
-      register_label_provider(policy,anon_object_relabel);
-      policy = strtok(NULL, ",");
-    }
-  }
+  DefineCustomBoolVariable
+  (
+    "anon.transparent_dynamic_masking",
+    "New masking engine (EXPERIMENTAL)",
+    "",
+    &guc_anon_transparent_dynamic_masking,
+    false,
+    PGC_SUSET,
+    0,
+    NULL,
+    NULL,
+    NULL
+  );
+
+  /* Register the security label provider for k-anonymity */
+  register_label_provider(guc_anon_k_anonymity_provider,
+                          pa_k_anonymity_object_relabel
+  );
+
+  /* Register a security label provider for each masking policy */
+  pa_assign_masking_policies();
+
+  /* Install the hooks */
+  prev_post_parse_analyze_hook = post_parse_analyze_hook;
+  post_parse_analyze_hook = pa_post_parse_analyze_hook;
 }
 
 /*
- * get_function_schema
+ * Unregister and restore the hook
+ */
+void
+_PG_fini(void) {
+  post_parse_analyze_hook = prev_post_parse_analyze_hook;
+}
+
+/*
+ * pa_cast_as_regtype
+ *   decorates a value with a CAST function
+ */
+static char *
+pa_cast_as_regtype(char * value, int atttypid)
+{
+  StringInfoData casted_value;
+  initStringInfo(&casted_value);
+  appendStringInfo(&casted_value, "CAST(%s AS %d::REGTYPE)", value, atttypid);
+  return casted_value.data;
+}
+
+/*
+ * anon_get_function_schema
  *   Given a function call, e.g. 'anon.fake_city()', returns the namespace of
  *   the function (if possible)
  *
@@ -345,7 +423,7 @@ _PG_init(void)
  */
 
 Datum
-get_function_schema(PG_FUNCTION_ARGS)
+anon_get_function_schema(PG_FUNCTION_ARGS)
 {
     bool input_is_null = PG_ARGISNULL(0);
     char* function_call= text_to_cstring(PG_GETARG_TEXT_PP(0));
@@ -391,13 +469,283 @@ get_function_schema(PG_FUNCTION_ARGS)
     PG_RETURN_TEXT_P(cstring_to_text(""));
 }
 
-Datum
-register_label(PG_FUNCTION_ARGS)
+/*
+ * pa_check_masking_policies
+ *   A validation function (hook) called when `anon.masking_policies` is set.
+ *
+ */
+static bool
+pa_check_masking_policies(char **newval, void **extra, GucSource source)
 {
-    bool input_is_null = PG_ARGISNULL(0);
-    char* policy= text_to_cstring(PG_GETARG_TEXT_PP(0));
-
-    if (input_is_null) PG_RETURN_NULL();
-    register_label_provider(policy,anon_object_relabel);
-    return true;
+  if (!*newval ||  strlen(*newval) == 0 )
+    ereport(ERROR,
+          (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+          errmsg("anon.masking_policies cannot be NULL or empty")));
+  return true;
 }
+
+/*
+ * pa_assign_masking_policies
+ *   register each masking policy as a security label provider
+ *
+ */
+static void
+pa_assign_masking_policies()
+{
+  List *      masking_policies;
+  ListCell *  c;
+  char *      dup = pstrdup(guc_anon_masking_policies);
+
+  SplitGUCList(dup, ',', &masking_policies);
+  foreach(c,masking_policies)
+  {
+    char  * policy = (char *) lfirst(c);
+    ereport(NOTICE, (errmsg("register %s", policy)));
+    register_label_provider(policy,pa_masking_policy_object_relabel);
+  }
+
+  return;
+}
+
+/*
+ * pa_has_mask_in_policy
+ *  checks that a role is masked in the given policy
+ *
+ */
+static bool
+pa_has_mask_in_policy(Oid roleid, char *policy)
+{
+  ObjectAddress role;
+  char * seclabel = NULL;
+
+  ObjectAddressSet(role, AuthIdRelationId, roleid);
+  seclabel = GetSecurityLabel(&role, policy);
+  return (!seclabel || strcmp(seclabel, "MASKED") != 0);
+}
+
+/*
+ * pa_get_masking_policy
+ *  For a given role, returns the policy in which he/she is masked or the NULL
+ *  if the role is not masked.
+ *
+ * https://github.com/fmbiete/pgdisablelogerror/blob/main/disablelogerror.c
+ */
+static char *
+pa_get_masking_policy(Oid roleid)
+{
+  ListCell   * r;
+  char * policy = NULL;
+
+  policy=pa_get_masking_policy_for_role(roleid);
+  if (policy) return policy;
+
+//  is_member_of_role(0,0);
+//  foreach(r,roles_is_member_of(roleid,1,InvalidOid, NULL))
+//  {
+//    policy=pa_get_masking_policy_for_role(lfirst_oid(r));
+//    if (policy) return policy;
+//  }
+
+  /* No masking policy found */
+  return NULL;
+}
+
+static char *
+pa_get_masking_policy_for_role(Oid roleid)
+{
+  List *      masking_policies;
+  ListCell *  c;
+  char *      dup = pstrdup(guc_anon_masking_policies);
+
+  SplitGUCList(dup, ',', &masking_policies);
+  foreach(c,masking_policies)
+  {
+    char  * policy = (char *) lfirst(c);
+    if (pa_has_mask_in_policy(roleid,policy))
+      return policy;
+  }
+
+  return NULL;
+}
+
+
+/*
+ * Post-parse-analysis hook: mask query
+ * https://github.com/taminomara/psql-hooks/blob/master/Detailed.md#post_parse_analyze_hook
+ */
+static void
+#if PG_VERSION_NUM < 140000
+pa_post_parse_analyze_hook(ParseState *pstate, Query *query)
+#else
+pa_post_parse_analyze_hook(ParseState *pstate, Query *query, JumbleState *jstate)
+#endif
+{
+  char * policy = pa_get_masking_policy(GetUserId());
+
+  if (prev_post_parse_analyze_hook)
+    prev_post_parse_analyze_hook(pstate, query, jstate);
+
+  if (!guc_anon_transparent_dynamic_masking)
+    return;
+
+  if (policy)
+    pa_rewrite(query,policy);
+
+  return;
+}
+
+static void
+pa_rewrite(Query * query, char * policy)
+{
+      ereport(ERROR,
+        (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+        errmsg("NOT IMPLEMENTED YET")));
+}
+
+
+/*
+ * masking_expression_for_att
+ *  returns the value for an attribute based on its masking rule (if any),
+ * which can be either:
+ *     - the attribute name (i.e. the authentic value)
+ *     - the function or value from the masking rule
+ *     - the defaut value of the column
+ *     - "NULL"
+ */
+static char *
+pa_masking_value_for_att(Relation rel, FormData_pg_attribute * att, char * policy)
+{
+  Oid relid;
+  ObjectAddress columnobject;
+  char * seclabel = NULL;
+  char * attname = (char *)quote_identifier(NameStr(att->attname));
+
+  // Get the masking rule, if any
+  relid=RelationGetRelid(rel);
+  ObjectAddressSubSet(columnobject, RelationRelationId, relid, att->attnum);
+  seclabel = GetSecurityLabel(&columnobject, policy);
+
+  // No masking rule found && Privacy By Default is off,
+  // the authentic value is shown
+  if (!seclabel && !guc_anon_privacy_by_default) return attname;
+
+  // A masking rule was found
+  if (seclabel && pg_strncasecmp(seclabel, "MASKED WITH FUNCTION", 20) == 0)
+  {
+    char * substr=malloc(strlen(seclabel));
+    strncpy(substr, seclabel+21, strlen(seclabel));
+    if (guc_anon_strict_mode) return pa_cast_as_regtype(substr, att->atttypid);
+    return substr;
+  }
+
+  if (seclabel && pg_strncasecmp(seclabel, "MASKED WITH VALUE", 17) == 0)
+  {
+    char * substr=malloc(strlen(seclabel));
+    strncpy(substr, seclabel+18, strlen(seclabel));
+    if (guc_anon_strict_mode) return pa_cast_as_regtype(substr, att->atttypid);
+    return substr;
+  }
+
+  // The column is declared as not masked, the authentic value is show
+  if (seclabel && pg_strncasecmp(seclabel,"NOT MASKED", 10) == 0) return attname;
+
+  // At this stage, we know privacy_by_default is on
+  // Let's try to find the default value of the column
+  if (att->atthasdef)
+  {
+    int i;
+    TupleDesc reldesc;
+
+    reldesc = RelationGetDescr(rel);
+    for(i=0; i< reldesc->constr->num_defval; i++)
+    {
+      if (reldesc->constr->defval[i].adnum == att->attnum )
+        return deparse_expression(stringToNode(reldesc->constr->defval[i].adbin),
+                                  NIL, false, false);
+    }
+
+  }
+
+  // No default value, NULL is the last possibility
+  return "NULL";
+}
+
+/*
+ * pa_anon_masking_expression_for_column
+ *   returns the masking filter that will mask the authentic data
+ *   of a column for a given masking policy
+ */
+Datum
+anon_masking_value_for_column(PG_FUNCTION_ARGS)
+{
+  Oid             relid = PG_GETARG_OID(0);
+  int             colnum = PG_GETARG_INT16(1); // numbered from 1 up
+  char *          masking_policy = text_to_cstring(PG_GETARG_TEXT_PP(2));
+  Relation        rel;
+  TupleDesc       reldesc;
+  FormData_pg_attribute *a;
+  StringInfoData  masking_value;
+
+  if (PG_ARGISNULL(0) || PG_ARGISNULL(1) || PG_ARGISNULL(2)) PG_RETURN_NULL();
+
+  rel = relation_open(relid, AccessShareLock);
+  if (!rel) PG_RETURN_NULL();
+
+  reldesc = RelationGetDescr(rel);
+  // Here attributes are numbered from 0 up
+  a = TupleDescAttr(reldesc, colnum - 1);
+  if (a->attisdropped) PG_RETURN_NULL();
+
+  initStringInfo(&masking_value);
+  appendStringInfoString( &masking_value,
+                    pa_masking_value_for_att(rel,a,masking_policy)
+                  );
+  relation_close(rel, NoLock);
+  PG_RETURN_TEXT_P(cstring_to_text(masking_value.data));
+}
+
+/*
+ * pa_anon_masking_expressions_for_table
+ *   returns the "select clause filters" that will mask the authentic data
+ *   of a table for a given masking policy
+ */
+Datum
+anon_masking_expressions_for_table(PG_FUNCTION_ARGS)
+{
+  Oid             relid = PG_GETARG_OID(0);
+  char *          masking_policy = text_to_cstring(PG_GETARG_TEXT_PP(1));
+  char            comma[] = " ";
+  Relation        rel;
+  TupleDesc       reldesc;
+  StringInfoData  filters;
+  int             i;
+
+  if (PG_ARGISNULL(0) || PG_ARGISNULL(1)) PG_RETURN_NULL();
+
+  rel = relation_open(relid, AccessShareLock);
+  if (!rel) PG_RETURN_NULL();
+
+  initStringInfo(&filters);
+  reldesc = RelationGetDescr(rel);
+
+  for (i = 0; i < reldesc->natts; i++)
+  {
+    FormData_pg_attribute * a;
+
+    a = TupleDescAttr(reldesc, i);
+    if (a->attisdropped) continue;
+
+    appendStringInfoString(&filters,comma);
+    appendStringInfo( &filters,
+                      "%s AS %s",
+                      pa_masking_value_for_att(rel,a,masking_policy),
+                      (char *)quote_identifier(NameStr(a->attname))
+                    );
+    comma[0]=',';
+  }
+  relation_close(rel, NoLock);
+
+  PG_RETURN_TEXT_P(cstring_to_text(filters.data));
+}
+
+//ereport(NOTICE, (errmsg_internal("")));
