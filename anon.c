@@ -50,20 +50,10 @@ PGDLLEXPORT Datum   anon_masking_expressions_for_table(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum   anon_masking_value_for_column(PG_FUNCTION_ARGS);
 PGDLLEXPORT void    _PG_init(void);
 PGDLLEXPORT void    _PG_fini(void);
-PGDLLEXPORT Datum   get_masking_policy(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(anon_get_function_schema);
 PG_FUNCTION_INFO_V1(anon_masking_expressions_for_table);
 PG_FUNCTION_INFO_V1(anon_masking_value_for_column);
-PG_FUNCTION_INFO_V1(get_function_schema);
-PG_FUNCTION_INFO_V1(anon_get_masking_policy);
-PG_FUNCTION_INFO_V1(register_label);
-
-/*
- * Internal functions
- */
-static char * pa_cast_as_regtype(char * value, int atttypid);
-static char * pa_masking_value_for_att(Relation rel, FormData_pg_attribute * att, char * policy);
 
 /*
  * GUC Parameters
@@ -87,12 +77,15 @@ static bool guc_anon_transparent_dynamic_masking;
 /*
  * Internal Functions
  */
-static void   pa_assign_masking_policies();
+void   pa_assign_masking_policies();
 static bool   pa_check_masking_policies(char **newval, void **extra, GucSource source);
 static char * pa_get_masking_policy_for_role(Oid roleid);
 static void   pa_masking_policy_object_relabel(const ObjectAddress *object, const char *seclabel);
 static bool   pa_has_mask_in_policy(Oid roleid, char *policy);
 static void   pa_rewrite(Query * query, char * policy);
+
+static char * pa_cast_as_regtype(char * value, int atttypid);
+static char * pa_masking_value_for_att(Relation rel, FormData_pg_attribute * att, char * policy);
 
 #if PG_VERSION_NUM < 140000
 static void   pa_post_parse_analyze_hook(ParseState *pstate, Query *query);
@@ -234,6 +227,10 @@ pa_k_anonymity_object_relabel(const ObjectAddress *object, const char *seclabel)
 void
 _PG_init(void)
 {
+  List *      masking_policies;
+  ListCell *  c;
+  char *      dup;
+
   /* GUC parameters */
   DefineCustomStringVariable
   (
@@ -381,7 +378,13 @@ _PG_init(void)
   );
 
   /* Register a security label provider for each masking policy */
-  pa_assign_masking_policies();
+  dup = pstrdup(guc_anon_masking_policies);
+  SplitGUCList(dup, ',', &masking_policies);
+  foreach(c,masking_policies)
+  {
+    char  * policy = (char *) lfirst(c);
+    register_label_provider(policy,pa_masking_policy_object_relabel);
+  }
 
   /* Install the hooks */
   prev_post_parse_analyze_hook = post_parse_analyze_hook;
@@ -485,28 +488,6 @@ pa_check_masking_policies(char **newval, void **extra, GucSource source)
   return true;
 }
 
-/*
- * pa_assign_masking_policies
- *   register each masking policy as a security label provider
- *
- */
-static void
-pa_assign_masking_policies()
-{
-  List *      masking_policies;
-  ListCell *  c;
-  char *      dup = pstrdup(guc_anon_masking_policies);
-
-  SplitGUCList(dup, ',', &masking_policies);
-  foreach(c,masking_policies)
-  {
-    char  * policy = (char *) lfirst(c);
-    ereport(NOTICE, (errmsg("register %s", policy)));
-    register_label_provider(policy,pa_masking_policy_object_relabel);
-  }
-
-  return;
-}
 
 /*
  * pa_has_mask_in_policy
@@ -521,7 +502,7 @@ pa_has_mask_in_policy(Oid roleid, char *policy)
 
   ObjectAddressSet(role, AuthIdRelationId, roleid);
   seclabel = GetSecurityLabel(&role, policy);
-  return (!seclabel || strcmp(seclabel, "MASKED") != 0);
+  return (seclabel && pg_strncasecmp(seclabel, "MASKED",6) == 0);
 }
 
 /*
@@ -540,6 +521,8 @@ pa_get_masking_policy(Oid roleid)
   policy=pa_get_masking_policy_for_role(roleid);
   if (policy) return policy;
 
+// Look at the parent roles
+//
 //  is_member_of_role(0,0);
 //  foreach(r,roles_is_member_of(roleid,1,InvalidOid, NULL))
 //  {
