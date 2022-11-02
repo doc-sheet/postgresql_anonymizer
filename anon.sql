@@ -1698,18 +1698,6 @@ AS 'MODULE_PATHNAME', 'anon_masking_value_for_column'
   PARALLEL SAFE
 ;
 
--- Register a SECURITY LABEL provider
--- /!\ there's no way to "unregister" a label, the label will remain forever in
--- the database.
-CREATE OR REPLACE FUNCTION anon.register_label(TEXT)
-RETURNS BOOLEAN
-AS 'MODULE_PATHNAME', 'register_label'
-  LANGUAGE C
-  VOLATILE
-  STRICT
-  PARALLEL UNSAFE
-;
-
 --
 -- Create an additional masking policy
 --
