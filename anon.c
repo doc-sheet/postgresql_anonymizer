@@ -36,6 +36,7 @@
 #include "utils/varlena.h"
 
 
+
 PG_MODULE_MAGIC;
 
 /* Saved hook values in case of unload */
