@@ -602,6 +602,8 @@ DECLARE
   datapath_check TEXT;
   success BOOLEAN;
 BEGIN
+  SELECT anon.init_masking_policies();
+
   IF anon.is_initialized() THEN
     RAISE NOTICE 'The anon extension is already initialized.';
     RETURN TRUE;
@@ -1660,6 +1662,15 @@ $$
 -- anonymize(), dump() and dynamic masking engine
 -------------------------------------------------------------------------------
 
+
+CREATE OR REPLACE FUNCTION anon.init_masking_policies()
+RETURNS BOOLEAN
+AS 'MODULE_PATHNAME', 'anon_init'
+  LANGUAGE C
+  IMMUTABLE
+  STRICT
+  PARALLEL SAFE
+;
 
 -- See tests in tests/sql/get_function_schema.sql
 CREATE OR REPLACE FUNCTION anon.get_function_schema(text)

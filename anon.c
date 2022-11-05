@@ -25,6 +25,7 @@
 #include "catalog/pg_class.h"
 #include "catalog/pg_database.h"
 #include "catalog/pg_namespace.h"
+#include "catalog/namespace.h"
 #include "miscadmin.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
@@ -46,12 +47,14 @@ static post_parse_analyze_hook_type prev_post_parse_analyze_hook = NULL;
  * External Functions
  */
 PGDLLEXPORT Datum   anon_get_function_schema(PG_FUNCTION_ARGS);
+PGDLLEXPORT Datum   anon_init(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum   anon_masking_expressions_for_table(PG_FUNCTION_ARGS);
 PGDLLEXPORT Datum   anon_masking_value_for_column(PG_FUNCTION_ARGS);
 PGDLLEXPORT void    _PG_init(void);
 PGDLLEXPORT void    _PG_fini(void);
 
 PG_FUNCTION_INFO_V1(anon_get_function_schema);
+PG_FUNCTION_INFO_V1(anon_init);
 PG_FUNCTION_INFO_V1(anon_masking_expressions_for_table);
 PG_FUNCTION_INFO_V1(anon_masking_value_for_column);
 
@@ -77,8 +80,8 @@ static bool guc_anon_transparent_dynamic_masking;
 /*
  * Internal Functions
  */
-void   pa_assign_masking_policies();
 static bool   pa_check_masking_policies(char **newval, void **extra, GucSource source);
+
 static char * pa_get_masking_policy_for_role(Oid roleid);
 static void   pa_masking_policy_object_relabel(const ObjectAddress *object, const char *seclabel);
 static bool   pa_has_mask_in_policy(Oid roleid, char *policy);
@@ -310,7 +313,7 @@ _PG_init(void)
     &guc_anon_restrict_to_trusted_schemas,
     false,
     PGC_SUSET,
-    0,
+    GUC_SUPERUSER_ONLY,
     NULL,
     NULL,
     NULL
@@ -382,8 +385,13 @@ _PG_init(void)
   SplitGUCList(dup, ',', &masking_policies);
   foreach(c,masking_policies)
   {
-    char  * policy = (char *) lfirst(c);
+    const char      *pg_catalog = "pg_catalog";
+    ObjectAddress   schema;
+    Oid             schema_id;
+    char            *policy = (char *) lfirst(c);
+
     register_label_provider(policy,pa_masking_policy_object_relabel);
+
   }
 
   /* Install the hooks */
@@ -397,6 +405,50 @@ _PG_init(void)
 void
 _PG_fini(void) {
   post_parse_analyze_hook = prev_post_parse_analyze_hook;
+}
+
+/*
+ * anon_init
+ *   Initialize the extension
+ *
+ */
+Datum
+anon_init(PG_FUNCTION_ARGS)
+{
+  List *      masking_policies;
+  ListCell *  m;
+  char *      dup;
+
+  /*
+   * In each masking policy, mark `anon` and `pg_catalog` as TRUSTED
+   * For some reasons, this can't be done in _PG_init()
+   */
+  dup = pstrdup(guc_anon_masking_policies);
+  SplitGUCList(dup, ',', &masking_policies);
+  foreach(m,masking_policies)
+  {
+    ObjectAddress   anon_schema;
+    ObjectAddress   pg_catalog_schema;
+    Oid             schema_id;
+    char            *policy = (char *) lfirst(m);
+    char            *seclabel = NULL;
+
+    register_label_provider(policy,pa_masking_policy_object_relabel);
+
+    schema_id=get_namespace_oid("anon",false);
+    ObjectAddressSet(anon_schema, NamespaceRelationId, schema_id);
+    seclabel = GetSecurityLabel(&anon_schema, policy);
+    if ( ! seclabel || pg_strcasecmp(seclabel,"TRUSTED") != 0)
+      SetSecurityLabel(&anon_schema,policy,"TRUSTED");
+
+    schema_id=get_namespace_oid("pg_catalog",false);
+    ObjectAddressSet(pg_catalog_schema, NamespaceRelationId, schema_id);
+    seclabel = GetSecurityLabel(&pg_catalog_schema, policy);
+    if ( ! seclabel || pg_strcasecmp(seclabel,"TRUSTED") != 0)
+      SetSecurityLabel(&pg_catalog_schema,policy,"TRUSTED");
+  }
+
+  PG_RETURN_BOOL(true);
 }
 
 /*
@@ -473,18 +525,38 @@ anon_get_function_schema(PG_FUNCTION_ARGS)
     PG_RETURN_TEXT_P(cstring_to_text(""));
 }
 
+
 /*
  * pa_check_masking_policies
  *   A validation function (hook) called when `anon.masking_policies` is set.
  *
+ * see: https://github.com/postgres/postgres/blob/REL_15_STABLE/src/backend/commands/variable.c#L44
  */
 static bool
 pa_check_masking_policies(char **newval, void **extra, GucSource source)
 {
+  char    *rawstring;
+  List    *elemlist;
+
   if (!*newval ||  strlen(*newval) == 0 )
-    ereport(ERROR,
-          (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-          errmsg("anon.masking_policies cannot be NULL or empty")));
+  {
+    GUC_check_errdetail("anon.masking_policies cannot be NULL or empty");
+    return false;
+  }
+
+  /* Need a modifiable copy of string */
+  rawstring = pstrdup(*newval);
+
+  /* Parse string into list of identifiers */
+  if (!SplitIdentifierString(rawstring, ',', &elemlist))
+  {
+    /* syntax error in list */
+    GUC_check_errdetail("List syntax is invalid.");
+    pfree(rawstring);
+    list_free(elemlist);
+    return false;
+  }
+
   return true;
 }
 
