@@ -31,7 +31,6 @@
 #include "utils/builtins.h"
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
-#include "utils/queryjumble.h"
 #include "utils/rel.h"
 #include "utils/ruleutils.h"
 #include "utils/varlena.h"
