@@ -602,7 +602,7 @@ DECLARE
   datapath_check TEXT;
   success BOOLEAN;
 BEGIN
-  SELECT anon.init_masking_policies();
+  PERFORM anon.init_masking_policies();
 
   IF anon.is_initialized() THEN
     RAISE NOTICE 'The anon extension is already initialized.';
