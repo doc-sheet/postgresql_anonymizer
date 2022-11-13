@@ -1707,6 +1707,7 @@ AS 'MODULE_PATHNAME', 'anon_masking_value_for_column'
   IMMUTABLE
   STRICT
   PARALLEL SAFE
+<<<<<<< HEAD
 ;
 
 
@@ -1734,6 +1735,8 @@ AS 'MODULE_PATHNAME', 'anon_masking_value_for_column'
   IMMUTABLE
   STRICT
   PARALLEL SAFE
+=======
+>>>>>>> 274ba330ca6110d9851f3dc696d49585eb72d48f
 ;
 
 --
