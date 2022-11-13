@@ -35,8 +35,6 @@
 #include "utils/ruleutils.h"
 #include "utils/varlena.h"
 
-
-
 PG_MODULE_MAGIC;
 
 /* Saved hook values in case of unload */
@@ -80,12 +78,10 @@ static bool guc_anon_transparent_dynamic_masking;
  * Internal Functions
  */
 static bool   pa_check_masking_policies(char **newval, void **extra, GucSource source);
-
 static char * pa_get_masking_policy_for_role(Oid roleid);
 static void   pa_masking_policy_object_relabel(const ObjectAddress *object, const char *seclabel);
 static bool   pa_has_mask_in_policy(Oid roleid, char *policy);
 static void   pa_rewrite(Query * query, char * policy);
-
 static char * pa_cast_as_regtype(char * value, int atttypid);
 static char * pa_masking_value_for_att(Relation rel, FormData_pg_attribute * att, char * policy);
 
@@ -659,7 +655,7 @@ pa_rewrite(Query * query, char * policy)
 
 
 /*
- * masking_expression_for_att
+ * pa_masking_expression_for_att
  *  returns the value for an attribute based on its masking rule (if any),
  * which can be either:
  *     - the attribute name (i.e. the authentic value)
@@ -726,41 +722,7 @@ pa_masking_value_for_att(Relation rel, FormData_pg_attribute * att, char * polic
 }
 
 /*
- * pa_anon_masking_expression_for_column
- *   returns the masking filter that will mask the authentic data
- *   of a column for a given masking policy
- */
-Datum
-anon_masking_value_for_column(PG_FUNCTION_ARGS)
-{
-  Oid             relid = PG_GETARG_OID(0);
-  int             colnum = PG_GETARG_INT16(1); // numbered from 1 up
-  char *          masking_policy = text_to_cstring(PG_GETARG_TEXT_PP(2));
-  Relation        rel;
-  TupleDesc       reldesc;
-  FormData_pg_attribute *a;
-  StringInfoData  masking_value;
-
-  if (PG_ARGISNULL(0) || PG_ARGISNULL(1) || PG_ARGISNULL(2)) PG_RETURN_NULL();
-
-  rel = relation_open(relid, AccessShareLock);
-  if (!rel) PG_RETURN_NULL();
-
-  reldesc = RelationGetDescr(rel);
-  // Here attributes are numbered from 0 up
-  a = TupleDescAttr(reldesc, colnum - 1);
-  if (a->attisdropped) PG_RETURN_NULL();
-
-  initStringInfo(&masking_value);
-  appendStringInfoString( &masking_value,
-                    pa_masking_value_for_att(rel,a,masking_policy)
-                  );
-  relation_close(rel, NoLock);
-  PG_RETURN_TEXT_P(cstring_to_text(masking_value.data));
-}
-
-/*
- * pa_anon_masking_expressions_for_table
+ * anon_masking_expressions_for_table
  *   returns the "select clause filters" that will mask the authentic data
  *   of a table for a given masking policy
  */
@@ -801,6 +763,41 @@ anon_masking_expressions_for_table(PG_FUNCTION_ARGS)
   relation_close(rel, NoLock);
 
   PG_RETURN_TEXT_P(cstring_to_text(filters.data));
+}
+
+
+/*
+ * anon_masking_expression_for_column
+ *   returns the masking filter that will mask the authentic data
+ *   of a column for a given masking policy
+ */
+Datum
+anon_masking_value_for_column(PG_FUNCTION_ARGS)
+{
+  Oid             relid = PG_GETARG_OID(0);
+  int             colnum = PG_GETARG_INT16(1); // numbered from 1 up
+  char *          masking_policy = text_to_cstring(PG_GETARG_TEXT_PP(2));
+  Relation        rel;
+  TupleDesc       reldesc;
+  FormData_pg_attribute *a;
+  StringInfoData  masking_value;
+
+  if (PG_ARGISNULL(0) || PG_ARGISNULL(1) || PG_ARGISNULL(2)) PG_RETURN_NULL();
+
+  rel = relation_open(relid, AccessShareLock);
+  if (!rel) PG_RETURN_NULL();
+
+  reldesc = RelationGetDescr(rel);
+  // Here attributes are numbered from 0 up
+  a = TupleDescAttr(reldesc, colnum - 1);
+  if (a->attisdropped) PG_RETURN_NULL();
+
+  initStringInfo(&masking_value);
+  appendStringInfoString( &masking_value,
+                    pa_masking_value_for_att(rel,a,masking_policy)
+                  );
+  relation_close(rel, NoLock);
+  PG_RETURN_TEXT_P(cstring_to_text(masking_value.data));
 }
 
 //ereport(NOTICE, (errmsg_internal("")));

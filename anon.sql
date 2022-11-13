@@ -1709,6 +1709,33 @@ AS 'MODULE_PATHNAME', 'anon_masking_value_for_column'
   PARALLEL SAFE
 ;
 
+
+CREATE OR REPLACE FUNCTION anon.masking_expressions_for_table(
+  OID,
+  TEXT
+)
+RETURNS TEXT
+AS 'MODULE_PATHNAME', 'anon_masking_expressions_for_table'
+  LANGUAGE C
+  IMMUTABLE
+  STRICT
+  PARALLEL SAFE
+;
+
+
+CREATE OR REPLACE FUNCTION anon.masking_value_for_column(
+  OID,
+  INT,
+  TEXT
+)
+RETURNS TEXT
+AS 'MODULE_PATHNAME', 'anon_masking_value_for_column'
+  LANGUAGE C
+  IMMUTABLE
+  STRICT
+  PARALLEL SAFE
+;
+
 --
 -- Create an additional masking policy
 --
