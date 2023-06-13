@@ -1625,6 +1625,144 @@ $$
 ;
 
 
+--------------------------------------------------------------------------------
+-- Bijection
+--------------------------------------------------------------------------------
+
+--
+-- Bijection is another form of pseudonymisation. It is a one-to-one
+-- transformation : for any numeric value and a "secret", it will produce a new
+-- value with the following properties:
+--      * if bijection(X) = bijection (Y), then X = Y
+--      * if bijection(X) != bijection (Y), then X != Y
+--
+-- this is useful when you want pseudonymisation AND uniqueness
+--
+
+CREATE OR REPLACE FUNCTION anon.bijection(
+  val BIGINT,
+  secret BIGINT DEFAULT NULL
+)
+RETURNS BIGINT
+AS
+$$
+  WITH secret AS (
+    SELECT COALESCE(
+            secret,
+            NULLIF(pg_catalog.current_setting('anon.bijection_secret'),'')::BIGINT
+    ) AS s
+  ),
+  max_length AS (
+    SELECT greatest(length(val::TEXT), length(secret.s::TEXT)) as m
+    FROM secret
+  ),
+  pad AS (
+    SELECT  LPAD(val::TEXT,max_length.m, '0') AS val,
+            LPAD(secret.s::TEXT,max_length.m, '0') AS secret
+    FROM max_length, secret
+  )
+  SELECT
+   string_agg(((
+    substring(pad.val,i,1)::INT +
+    substring(pad.secret,i,1)::INT
+  ) % 10) ::CHAR, '') :: BIGINT
+ FROM
+  max_length,
+  pad,
+  generate_series(1, max_length.m) i
+$$
+  LANGUAGE SQL
+  IMMUTABLE
+  PARALLEL SAFE
+  SECURITY INVOKER
+  SET search_path=''
+;
+
+CREATE OR REPLACE FUNCTION anon.bijection_id(
+  val TEXT,
+  secret BIGINT DEFAULT NULL
+)
+RETURNS TEXT
+AS
+$$
+  SELECT trim(to_char(
+         anon.bijection( regexp_replace(val, '[^0-9]+', '', 'g')::BIGINT,
+                         secret),
+            regexp_replace(val, '[0-9]', '9', 'g')
+  ));
+$$
+  LANGUAGE SQL
+  IMMUTABLE
+  PARALLEL SAFE
+  SECURITY INVOKER
+  SET search_path=''
+;
+
+CREATE OR REPLACE FUNCTION anon.bijection_siret(
+  val TEXT,
+  secret BIGINT DEFAULT NULL
+)
+RETURNS BIGINT
+AS
+$$
+  SELECT anon.luhn_append(
+          anon.bijection(
+            regexp_replace(val, '\s', '', 'g')::BIGINT/10,
+            secret
+          )
+        );
+$$
+  LANGUAGE SQL
+  IMMUTABLE
+  PARALLEL SAFE
+  SECURITY INVOKER
+  SET search_path=''
+;
+
+CREATE OR REPLACE FUNCTION anon.luhn_generate_checkdigit(
+  val BIGINT
+)
+RETURNS BIGINT
+AS $$
+  -- Add the digits, doubling even-numbered digits (counting left
+  -- with least-significant as zero). Subtract the remainder of
+  -- dividing the sum by 10 from 10, and take the remainder
+  -- of dividing that by 10 in turn.
+  SELECT ((BIGINT '10' - SUM(doubled_digit / BIGINT '10' + doubled_digit % BIGINT '10') %
+                       BIGINT '10') % BIGINT '10')::BIGINT
+  FROM (SELECT
+         -- Extract digit `n' counting left from least significant\
+         -- as zero
+         MOD( (val::BIGINT / (10^n)::BIGINT), 10::BIGINT )
+         -- double even-numbered digits
+         * (2 - MOD(n,2))
+         AS doubled_digit
+         FROM pg_catalog.generate_series(0, floor(log( val ))::integer) AS n
+  ) AS doubled_digits;
+
+$$
+  LANGUAGE SQL
+  STRICT
+  IMMUTABLE
+  PARALLEL SAFE
+  SECURITY INVOKER
+  SET search_path=''
+;
+
+CREATE OR REPLACE FUNCTION anon.luhn_append(
+  val BIGINT
+)
+RETURNS BIGINT
+AS $$
+  SELECT 10 * val + anon.luhn_generate_checkdigit(val);
+$$
+  LANGUAGE SQL
+  IMMUTABLE
+  PARALLEL SAFE
+  SECURITY INVOKER
+  SET search_path=''
+  STRICT
+;
 
 
 -------------------------------------------------------------------------------

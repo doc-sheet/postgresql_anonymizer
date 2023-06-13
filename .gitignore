@@ -44,3 +44,6 @@ debian/.debhelper/
 debian/debhelper-build-stamp
 debian/postgresql-??-anonymizer.substvars
 debian/postgresql-??-anonymizer/
+debian/..substvars
+debian/files
+debian/usr/
