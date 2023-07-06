@@ -69,6 +69,19 @@ SELECT anon.bijection_siret('483 247 862',78435973) = '167596592';
  t
 (1 row)
 
+-- BUG : leading zeros
+SELECT length(anon.bijection_id('1234567890',9111111111))=10;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT anon.bijection_id('1-0-7',951) = '0-5-8';
+ ?column? 
+----------
+ t
+(1 row)
+
 -- Using the bijection_secret GUC
 SET anon.bijection_secret TO '78435973';
 SELECT anon.bijection(48324786) = 16759659;

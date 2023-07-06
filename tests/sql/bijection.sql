@@ -23,6 +23,10 @@ SELECT anon.luhn_append(16759659) = 167596592;
 
 SELECT anon.bijection_siret('483 247 862',78435973) = '167596592';
 
+-- leading zeros
+SELECT length(anon.bijection_id('1234567890',9111111111))=10;
+SELECT anon.bijection_id('1-0-7',951) = '0-5-8';
+
 -- Using the bijection_secret GUC
 
 SET anon.bijection_secret TO '78435973';

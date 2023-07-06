@@ -1688,7 +1688,7 @@ $$
   SELECT trim(to_char(
          anon.bijection( regexp_replace(val, '[^0-9]+', '', 'g')::BIGINT,
                          secret),
-            regexp_replace(val, '[0-9]', '9', 'g')
+            regexp_replace(val, '[0-9]', '0', 'g') -- add leading zeros
   ));
 $$
   LANGUAGE SQL
