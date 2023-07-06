@@ -69,7 +69,7 @@ SELECT anon.bijection_siret('483 247 862',78435973) = '167596592';
  t
 (1 row)
 
--- BUG : leading zeros
+-- leading zeros
 SELECT length(anon.bijection_id('1234567890',9111111111))=10;
  ?column? 
 ----------
