@@ -1641,25 +1641,18 @@ $$
 
 CREATE OR REPLACE FUNCTION anon.bijection(
   val BIGINT,
-  secret BIGINT DEFAULT NULL
+  secret BIGINT
 )
 RETURNS BIGINT
 AS
 $$
-  WITH secret AS (
-    SELECT COALESCE(
-            secret,
-            NULLIF(pg_catalog.current_setting('anon.bijection_secret'),'')::BIGINT
-    ) AS s
-  ),
-  max_length AS (
-    SELECT greatest(length(val::TEXT), length(secret.s::TEXT)) as m
-    FROM secret
+  WITH max_length AS (
+    SELECT greatest(length(val::TEXT), length(secret::TEXT)) as m
   ),
   pad AS (
     SELECT  LPAD(val::TEXT,max_length.m, '0') AS val,
-            LPAD(secret.s::TEXT,max_length.m, '0') AS secret
-    FROM max_length, secret
+            LPAD(secret::TEXT,max_length.m, '0') AS secret
+    FROM max_length
   )
   SELECT
    string_agg(((
@@ -1680,7 +1673,7 @@ $$
 
 CREATE OR REPLACE FUNCTION anon.bijection_id(
   val TEXT,
-  secret BIGINT DEFAULT NULL
+  secret BIGINT
 )
 RETURNS TEXT
 AS
@@ -1700,17 +1693,20 @@ $$
 
 CREATE OR REPLACE FUNCTION anon.bijection_siret(
   val TEXT,
-  secret BIGINT DEFAULT NULL
+  secret BIGINT
 )
-RETURNS BIGINT
+RETURNS TEXT
 AS
 $$
-  SELECT anon.luhn_append(
-          anon.bijection(
-            regexp_replace(val, '\s', '', 'g')::BIGINT/10,
-            secret
-          )
-        );
+  SELECT trim(to_char(
+          anon.luhn_append(
+            anon.bijection(
+              regexp_replace(val, '[^0-9]+', '', 'g')::BIGINT,
+              secret
+            )/10 -- remove last char
+          ),
+          regexp_replace(val, '[0-9]', '0', 'g') -- add leading zeros
+        ));
 $$
   LANGUAGE SQL
   IMMUTABLE

@@ -2,14 +2,17 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS anon CASCADE;
 
+CREATE ROLE bob;
+SET ROLE bob;
+
 -- Strict mode checks
 
 SELECT anon.bijection(NULL,NULL) IS NULL;
 SELECT anon.bijection(0,NULL) IS NULL;
 SELECT anon.bijection(NULL,0) IS NULL;
-SELECT anon.bijection_id(NULL) IS NULL;
+SELECT anon.bijection_id(NULL,NULL) IS NULL;
 SELECT anon.luhn_append(NULL) IS NULL;
-SELECT anon.bijection_siret(NULL) IS NULL;
+SELECT anon.bijection_siret(NULL,NULL) IS NULL;
 
 -- Using the secret param
 
@@ -21,23 +24,15 @@ SELECT anon.bijection_id('483-247-86',78435973) = '167-596-59';
 
 SELECT anon.luhn_append(16759659) = 167596592;
 
-SELECT anon.bijection_siret('483 247 862',78435973) = '167596592';
+SELECT anon.bijection_siret('483 247 862',784359735) = '167 596 592';
 
 -- leading zeros
 SELECT length(anon.bijection_id('1234567890',9111111111))=10;
 SELECT anon.bijection_id('1-0-7',951) = '0-5-8';
-
--- Using the bijection_secret GUC
-
-SET anon.bijection_secret TO '78435973';
-
-SELECT anon.bijection(48324786) = 16759659;
-
-SELECT anon.bijection_id('483-247-86',78435973) = '167-596-59';
-
-SELECT anon.bijection_siret('483 247 862') = '167596592';
+SELECT anon.bijection_siret('105104103','951951951')= '056055056';
 
 -- Masking a Foreign Key
+RESET ROLE;
 
 CREATE TABLE people (
   ssn TEXT PRIMARY KEY,
@@ -61,16 +56,14 @@ SELECT * FROM people;
 
 SELECT * FROM driver_license;
 
-SET anon.bijective_secret TO '357835675';
-
 SECURITY LABEL FOR anon ON COLUMN people.name
   IS 'MASKED WITH VALUE $$CONFIDENTIAL$$';
 
 SECURITY LABEL FOR anon ON COLUMN people.ssn
-  IS 'MASKED WITH FUNCTION anon.bijection_id(ssn)';
+  IS 'MASKED WITH FUNCTION anon.bijection_id(ssn,35783567)';
 
 SECURITY LABEL FOR anon ON COLUMN driver_license.driver_ssn
-  IS 'MASKED WITH FUNCTION anon.bijection_id(driver_ssn)';
+  IS 'MASKED WITH FUNCTION anon.bijection_id(driver_ssn,35783567)';
 
 SELECT anon.anonymize_database();
 
