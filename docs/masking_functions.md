@@ -313,14 +313,14 @@ Bijection
 
 Bijection is another kind of [Pseudonymization]. It is basically a  one-to-one
 transformation that will generate a unique fake value for each original value.
-Thus it is a good method for natural primary keys (as oppose to surrogate keys).
+Thus it is a good method for natural primary keys (as opposed to surrogate keys).
 
-The transformation is based on a "bijection secret" that is stored inside the
-database itself: either as a global configuration (GUC) or directly inside the
-masking rule. The "bijection secret" is the link between the fake value and the
-original value, therefore it should be protected with the same level of security
-that the data itself. Anyone gaining access the the bijection secret will be
-able to apply the "backward transformation" to de-anonymize the fake values.
+The transformation is based on a "bijection secret" that is stored
+directly inside the masking rule. The "bijection secret" is the link between
+the fake value and the original value, therefore it should be protected with
+the same level of security that the data itself. Anyone gaining access the the
+bijection secret will be able to apply the "backward transformation" to
+de-anonymize the fake values.
 
 See the **WARNING** section of the [Pseudonymization] chapter for more derails.
 
@@ -347,27 +347,22 @@ more tricky:
 * the refential integrity with the `driver_ssn` column must be respected !
 
 
-First we define the bijection secret for this database
-
-```sql
-ALTER DATABASE vehicules_db SET anon.bijection_secret TO '357835675';
-```
-
-Then declare the masking rules for the `people` table:
+First we define random series of digits as the "bijection secret" for this
+column and declare the masking rules for the `people` table:
 
 ```sql
 SECURITY LABEL FOR anon ON COLUMN people.name
   IS $$ MASKED WITH VALUE 'CONFIDENTIAL' $$;
 
 SECURITY LABEL FOR anon ON COLUMN people.ssn
-  IS $$ MASKED WITH FUNCTION anon.bijection_id(ssn);
+  IS $$ MASKED WITH FUNCTION anon.bijection_id(ssn, 357835675);
 ```
 
 And we'll use the same bijection transformation for the `driver_license` table:
 
 ```sql
 SECURITY LABEL FOR anon ON COLUMN driver_license.driver_ssn
-  IS 'MASKED WITH FUNCTION anon.bijection_id(driver_ssn)';
+  IS 'MASKED WITH FUNCTION anon.bijection_id(driver_ssn, 357835675)';
 ```
 
 Finally anonymize the table
@@ -399,9 +394,6 @@ There are 3 possible bijections:
 * bijection_id(val, secret) transforms a formatted numeric id (eg "12-34/7")
   into a new id and applies with the same format.
 * bijection_siret(val,secret) transforms a French company id into a new valid one
-
-The secret parameter is optionnal is not provided the value of
-`anon.bijection_secret` will be used.
 
 > **IMPORTANT**: the secret must only composed of digits !
 
