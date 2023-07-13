@@ -76,7 +76,6 @@ static bool   guc_anon_strict_mode;
 // but they are used in the plpgsql code
 // compile with `-Wno-unused-variable` to avoid warnings
 static char *guc_anon_algorithm;
-static char *guc_anon_bijection_secret;
 static char *guc_anon_mask_schema;
 static char *guc_anon_salt;
 static char *guc_anon_source_schema;
@@ -284,20 +283,6 @@ _PG_init(void)
     "",
     &guc_anon_algorithm,
     "sha256",
-    PGC_SUSET,
-    GUC_SUPERUSER_ONLY,
-    NULL,
-    NULL,
-    NULL
-  );
-
-  DefineCustomStringVariable
-  (
-    "anon.bijection_secret",
-    "The secret value used for bijective pseudonymization",
-    "",
-    &guc_anon_bijection_secret,
-    NULL,
     PGC_SUSET,
     GUC_SUPERUSER_ONLY,
     NULL,
