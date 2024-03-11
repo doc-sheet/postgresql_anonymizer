@@ -32,3 +32,14 @@ pub use pgrx::pg_sys::String as SchemaValue;
 
 #[cfg(any(feature = "pg11", feature = "pg12", feature = "pg13", feature = "pg14"))]
 pub use pgrx::pg_sys::Value as SchemaValue;
+
+///
+/// strVal macro
+///
+
+#[cfg(any(feature = "pg15", feature = "pg16"))]
+pub unsafe fn strVal(v: SchemaValue) -> *const i8 { v.sval }
+
+#[allow(non_snake_case)]
+#[cfg(any(feature = "pg11", feature = "pg12", feature = "pg13", feature = "pg14"))]
+pub unsafe fn strVal(v: SchemaValue) -> *const i8 { v.val.str_ }
