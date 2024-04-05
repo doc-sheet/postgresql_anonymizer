@@ -4,6 +4,7 @@ use pgrx::prelude::*;
 use pgrx::PgSqlErrorCode::*;
 
 mod compat;
+mod dummy;
 mod error;
 mod guc;
 mod input;
@@ -107,6 +108,46 @@ mod anon {
     use std::ffi::CStr;
     use std::ffi::CString;
     use crate::masking;
+
+    use crate::dummy;
+    use fake::Fake;
+    use fake::faker::administrative::raw::*;
+    use fake::locales::*;
+
+    // Lorem
+    use fake::faker::lorem::raw::*;
+    dummy::declare_fn_String!(dummy_word,Word);
+    dummy::declare_fn_with_range_to_string!(dummy_words,Words);
+    dummy::declare_fn_with_range_to_string!(dummy_sentence,Sentence);
+    dummy::declare_fn_with_range_to_string!(dummy_sentences,Sentences);
+
+    // Person
+    use fake::faker::name::raw::*;
+    dummy::declare_fn_String!(dummy_first_name,FirstName);
+    dummy::declare_fn_String!(dummy_last_name,LastName);
+    dummy::declare_fn_String!(dummy_title,Title);
+    dummy::declare_fn_String!(dummy_suffix,Suffix);
+    dummy::declare_fn_String!(dummy_name,Name);
+    dummy::declare_fn_String!(dummy_name_with_title,NameWithTitle);
+
+    // Internet
+    use fake::faker::internet::raw::*;
+    dummy::declare_fn_String!(dummy_free_email_provider,FreeEmailProvider);
+    dummy::declare_fn_String!(dummy_domain_suffix,DomainSuffix);
+    dummy::declare_fn_String!(dummy_free_email,FreeEmail);
+    dummy::declare_fn_String!(dummy_safe_email,SafeEmail);
+    dummy::declare_fn_String!(dummy_username,Username);
+    //dummy::declare_fn_String!(dummy_Password(len_range: Range<usize>);
+    dummy::declare_fn_String!(dummy_ipv4,IPv4);
+    dummy::declare_fn_String!(dummy_ipv6,IPv6);
+    dummy::declare_fn_String!(dummy_ip,IP);
+    dummy::declare_fn_String!(dummy_mac_address,MACAddress);
+    dummy::declare_fn_String!(dummy_user_agent,UserAgent);
+
+    #[pg_extern]
+    pub fn dummy_health_insurance_code(locale: &'static str) -> String {
+        dummy::dummy_fr_only!(HealthInsuranceCode,locale)
+    }
 
     /// Decorate a value with a CAST function
     ///
