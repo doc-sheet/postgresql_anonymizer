@@ -35,7 +35,6 @@ macro_rules! range_usize {
         }
     }
 }
-pub(crate) use range_usize;
 
 #[macro_export]
 macro_rules! dummy_with_range {

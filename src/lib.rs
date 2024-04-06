@@ -111,24 +111,116 @@ mod anon {
 
     use crate::dummy;
     use fake::Fake;
-    use fake::faker::administrative::raw::*;
     use fake::locales::*;
 
-    // Lorem
-    use fake::faker::lorem::raw::*;
-    dummy::declare_fn_String!(dummy_word,Word);
-    dummy::declare_fn_with_range_to_string!(dummy_words,Words);
-    dummy::declare_fn_with_range_to_string!(dummy_sentence,Sentence);
-    dummy::declare_fn_with_range_to_string!(dummy_sentences,Sentences);
+    // Address
+    use fake::faker::address::raw::*;
+    dummy::declare_fn_String!(dummy_city_prefix,CityPrefix);
+    dummy::declare_fn_String!(dummy_city_suffix,CitySuffix);
+    dummy::declare_fn_String!(dummy_city_name,CityName);
+    dummy::declare_fn_String!(dummy_country_name,CountryName);
+    dummy::declare_fn_String!(dummy_country_code,CountryCode);
+    dummy::declare_fn_String!(dummy_street_suffix,StreetSuffix);
+    dummy::declare_fn_String!(dummy_street_name,StreetName);
+    dummy::declare_fn_String!(dummy_timezone,TimeZone);
+    dummy::declare_fn_String!(dummy_state_name,StateName);
+    dummy::declare_fn_String!(dummy_state_abbr,StateAbbr);
+    dummy::declare_fn_String!(dummy_secondary_address_type,SecondaryAddressType);
+    dummy::declare_fn_String!(dummy_secondary_address,SecondaryAddress);
+    dummy::declare_fn_String!(dummy_zip_code,ZipCode);
+    dummy::declare_fn_String!(dummy_post_code,PostCode);
+    dummy::declare_fn_String!(dummy_building_number,BuildingNumber);
+    dummy::declare_fn_String!(dummy_latitude,Latitude);
+    dummy::declare_fn_String!(dummy_longitude,Longitude);
+    //dummy::declare_fn_String!(dummy_Geohash(precision: u8);
 
-    // Person
-    use fake::faker::name::raw::*;
-    dummy::declare_fn_String!(dummy_first_name,FirstName);
-    dummy::declare_fn_String!(dummy_last_name,LastName);
-    dummy::declare_fn_String!(dummy_title,Title);
-    dummy::declare_fn_String!(dummy_suffix,Suffix);
-    dummy::declare_fn_String!(dummy_name,Name);
-    dummy::declare_fn_String!(dummy_name_with_title,NameWithTitle);
+    // Administrative
+    use fake::faker::administrative::raw::*;
+    #[pg_extern]
+    pub fn dummy_health_insurance_code(locale: &'static str) -> String {
+        dummy::dummy_fr_only!(HealthInsuranceCode,locale)
+    }
+
+    // Automotive
+    //use fake::faker::automotive::raw::*;
+    //dummy::declare_fn_String!(dummy_licence_plate,LicencePlate);
+
+    // Barcode
+    use fake::faker::barcode::raw::*;
+    dummy::declare_fn_String!(dummy_isbn,Isbn);
+    dummy::declare_fn_String!(dummy_isbn13,Isbn13);
+    dummy::declare_fn_String!(dummy_isbn10,Isbn10);
+
+    // BigDecimal
+    /*
+    use fake::bigdecimal::*;
+    dummy::declare_fn_String!(dummy_big_decimal,BigDecimal);
+    dummy::declare_fn_String!(dummy_positive_big_decimal,PositiveBigDecimal);
+    dummy::declare_fn_String!(dummy_negative_big_decimal,NegativeBigDecimal);
+    dummy::declare_fn_String!(dummy_no_big_decimal_points,NoBigDecimalPoints);
+    */
+
+    // Color
+    /*
+    use fake::faker::color::raw::*;
+    dummy::declare_fn_String!(dummy_hex_color,HexColor);
+    dummy::declare_fn_String!(dummy_rgb_color,RgbColor);
+    dummy::declare_fn_String!(dummy_rgba_color,RgbaColor);
+    dummy::declare_fn_String!(dummy_hsl_color,HslColor);
+    dummy::declare_fn_String!(dummy_hsla_color,HslaColor);
+    dummy::declare_fn_String!(dummy_color,Color);
+*/
+
+    // Company
+    use fake::faker::company::raw::*;
+    dummy::declare_fn_String!(dummy_company_suffix,CompanySuffix);
+    dummy::declare_fn_String!(dummy_company_name,CompanyName);
+    dummy::declare_fn_String!(dummy_buzzword,Buzzword);
+    dummy::declare_fn_String!(dummy_buzzword_middle,BuzzwordMiddle);
+    dummy::declare_fn_String!(dummy_buzzword_tail,BuzzwordTail);
+    dummy::declare_fn_String!(dummy_catchphrase,CatchPhase);
+    dummy::declare_fn_String!(dummy_bs_verb,BsVerb);
+    dummy::declare_fn_String!(dummy_bs_adj,BsAdj);
+    dummy::declare_fn_String!(dummy_bs_noun,BsNoun);
+    dummy::declare_fn_String!(dummy_bs,Bs);
+    dummy::declare_fn_String!(dummy_profession,Profession);
+    dummy::declare_fn_String!(dummy_industry,Industry);
+
+    // Creditcard
+    use fake::faker::creditcard::raw::*;
+    dummy::declare_fn_String!(dummy_credit_card_number,CreditCardNumber);
+
+    // Currency
+    use fake::faker::currency::raw::*;
+    dummy::declare_fn_String!(dummy_currency_code,CurrencyCode);
+    dummy::declare_fn_String!(dummy_currency_name,CurrencyName);
+    dummy::declare_fn_String!(dummy_currency_symbol,CurrencySymbol);
+
+    // Decimal
+    /*
+    use fake::decimal::*;
+    dummy::declare_fn_String!(dummy_positive_decimal,PositiveDecimal);
+    dummy::declare_fn_String!(dummy_negative_decimal,NegativeDecimal);
+    dummy::declare_fn_String!(dummy_no_decimal_points,NoDecimalPoints);
+    */
+
+    // Filesystem
+    use fake::faker::filesystem::raw::*;
+    dummy::declare_fn_String!(dummy_file_path,FilePath);
+    dummy::declare_fn_String!(dummy_file_name,FileName);
+    dummy::declare_fn_String!(dummy_file_extension,FileExtension);
+    dummy::declare_fn_String!(dummy_dir_path,DirPath);
+
+    // Finance
+    use fake::faker::finance::raw::*;
+    dummy::declare_fn_String!(dummy_bic,Bic);
+    dummy::declare_fn_String!(dummy_isin,Isin);
+
+    // HTTP
+    //use fake::faker::http::fr_fr::RfcStatusCode;
+    //use fake::faker::http::raw::*;
+    //dummy::declare_fn_String!(dummy_rfc_status_code,RfcStatusCode);
+    //dummy::declare_fn_String!(dummy_valid_statux_code,ValidStatusCode);
 
     // Internet
     use fake::faker::internet::raw::*;
@@ -144,10 +236,47 @@ mod anon {
     dummy::declare_fn_String!(dummy_mac_address,MACAddress);
     dummy::declare_fn_String!(dummy_user_agent,UserAgent);
 
+    // Lorem
+    use fake::faker::lorem::raw::*;
+    dummy::declare_fn_String!(dummy_word,Word);
+    dummy::declare_fn_with_range_to_string!(dummy_words,Words);
+    //dummy::declare_fn_with_range_to_string!(dummy_sentence,Sentence);
+    //dummy::declare_fn_with_range_to_string!(dummy_sentences,Sentences);
+
+    // Person
+    use fake::faker::name::raw::*;
+    dummy::declare_fn_String!(dummy_first_name,FirstName);
+    dummy::declare_fn_String!(dummy_last_name,LastName);
+    dummy::declare_fn_String!(dummy_title,Title);
+    dummy::declare_fn_String!(dummy_suffix,Suffix);
+    dummy::declare_fn_String!(dummy_name,Name);
+    dummy::declare_fn_String!(dummy_name_with_title,NameWithTitle);
+
+    // Phone Number
+    use fake::faker::phone_number::raw::*;
+    dummy::declare_fn_String!(dummy_phone_number,PhoneNumber);
+    dummy::declare_fn_String!(dummy_cell_number,CellNumber);
+
+    // Time
+    /*
+    use fake::faker::time::raw::*;
+    dummy::declare_fn_String!(dummy_time,Time);
+    */
+
+    // UUID
+    use fake::uuid::*;
+
     #[pg_extern]
-    pub fn dummy_health_insurance_code(locale: &'static str) -> String {
-        dummy::dummy_fr_only!(HealthInsuranceCode,locale)
-    }
+    pub fn dummy_uuidv1() -> String {UUIDv1.fake()}
+
+    #[pg_extern]
+    pub fn dummy_uuidv3() -> String {UUIDv3.fake()}
+
+    #[pg_extern]
+    pub fn dummy_uuidv4() -> String {UUIDv4.fake()}
+
+    #[pg_extern]
+    pub fn dummy_uuidv5() -> String {UUIDv5.fake()}
 
     /// Decorate a value with a CAST function
     ///
