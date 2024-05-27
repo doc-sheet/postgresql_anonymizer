@@ -49,30 +49,32 @@ This extension is available in two versions :
 
 
 
-Install on RedHat / CentOS
+Install on RedHat / Rocky Linux / Alma Linux
 ------------------------------------------------------------------------------
 
-> This is the recommended way to install the `stable` extension
-> This method works for RHEL/CentOS 7 and 8. If you're running RHEL/CentOS 6,
-> consider upgrading or read the [Install With PGXN] section.
+> This is the recommended way to install the `stable` version
+> This method works for RHEL 8 and 9. If you're running an obsolete version of
+> RHEL consider upgrading or read the [Install With PGXN] section.
 
-_Step 0:_ Add the [PostgreSQL Official RPM Repo] to your system. It should be
-something like:
+_Step 0:_ Add the [DaLibo Labs RPM Repo] to your system.
 
 ```console
-sudo yum install https://.../pgdg-redhat-repo-latest.noarch.rpm
+sudo dnf install https://.../pgdg-redhat-repo-latest.noarch.rpm
 ```
 
-[PostgreSQL Official RPM Repo]: https://yum.postgresql.org/
+[Dalibo Labs RPM Repo]: https://yum.dalibo.org/labs/
 
+
+Alternatively you can download the `latest` version from the
+[Gitlab Package Registry].
 
 _Step 1:_ Deploy
 
 ```console
-sudo yum install postgresql_anonymizer_14
+sudo yum install postgresql_anonymizer_16
 ```
 
-(Replace `14` with the major version of your PostgreSQL instance.)
+(Replace `16` with the major version of your PostgreSQL instance.)
 
 _Step 2:_  Load the extension.
 
@@ -96,6 +98,56 @@ SELECT anon.init();
 
 All new connections to the database can now use the extension.
 
+Install on Debian / Ubuntu
+------------------------------------------------------------------------------
+
+> This is the recommended way to install the `stable` version
+
+_Step 0:_ Add the [DaLibo Labs DEB Repo] to your system.
+
+```console
+apt install curl lsb-release
+echo deb http://apt.dalibo.org/labs $(lsb_release -cs)-dalibo main > /etc/apt/sources.list.d/dalibo-labs.list
+curl -fsSL -o /etc/apt/trusted.gpg.d/dalibo-labs.gpg https://apt.dalibo.org/labs/debian-dalibo.gpg
+apt update
+```
+
+[Dalibo Labs DEB Repo]: https://apt.dalibo.org/labs/
+
+Alternatively you can download the `latest` version from the
+[Gitlab Package Registry].
+
+[Gitlab Package Registry]: https://gitlab.com/dalibo/postgresql_anonymizer/-/packages
+
+_Step 1:_ Deploy
+
+```console
+sudo apt install postgresql_anonymizer_16
+```
+
+(Replace `16` with the major version of your PostgreSQL instance.)
+
+_Step 2:_  Load the extension.
+
+```sql
+ALTER DATABASE foo SET session_preload_libraries = 'anon';
+```
+
+(If you're already loading extensions that way, just add `anon` the current list)
+
+_Step 3:_  Close your session and open a new one. Create the extension.
+
+```sql
+CREATE EXTENSION anon CASCADE;
+```
+
+_Step 4:_  Initialize the extension
+
+```sql
+SELECT anon.init();
+```
+
+All new connections to the database can now use the extension.
 
 Install With [PGXN](https://pgxn.org/) :
 ------------------------------------------------------------------------------
@@ -150,11 +202,14 @@ All new connections to the database can now use the extension.
 Install From source
 ------------------------------------------------------------------------------
 
+[PGRX System Requirements]: https://github.com/pgcentralfoundation/pgrx?tab=readme-ov-file#system-requirements
+
 > This is the recommended way to install the `latest` extension
 
-_Step 0:_ First you need to install the postgresql development libraries.
-On most distributions, this is available through a package called
-`postgresql-devel` or `postgresql-server-dev`.
+**Important**: Building the extension requires a full Rust development
+environment. It is not recommended to build it on a production server.
+
+_Step 0:_ First you need to install the [PGRX System Requirements].
 
 _Step 1:_ Download the source from the
 [official repository on Gitlab](https://gitlab.com/dalibo/postgresql_anonymizer/),
@@ -324,25 +379,33 @@ Install on MacOS
 
 **WE DO NOT PROVIDE COMMUNITY SUPPORT FOR THIS EXTENSION ON MACOS SYSTEMS.**
 
-However it should be possible to build the extension with the following lines:
+However it should be possible to build the extension if you install the
+[PGRX Mac OS system requirements] and then follow the regular
+[install from source] procedure.
 
-```console
-export C_INCLUDE_PATH="$(xcrun --show-sdk-path)/usr/include"
-make extension
-make install
-```
+[PGRX Mac OS system requirements]: https://github.com/pgcentralfoundation/pgrx?tab=readme-ov-file#system-requirements
 
 Install on Windows
 ------------------------------------------------------------------------------
 
-**WE DO NOT PROVIDE COMMUNITY SUPPORT FOR THIS EXTENSION ON WINDOWS.**
+PostgreSQL Anonymizer is built upon the [PGRX] framework and currently [PGRX]
+does not support compiling PostgreSQL extensions for Windows.
 
-However it is possible to compile it using Visual Studio and the `build.bat`
-file.
+This is means that there's no native build of PostgreSQL Anonymizer for Windows.
 
-We provide Windows binaries and install files as part of our commercial
-support.
+However is it possible to run PostgreSQL inside a WSL2 container, which is
+basically an Ubuntu subsystem running on Windows.
 
+You can then install PostgreSQL Anonymizer inside the WSL2 container like you
+would on a regular Ubuntu server.
+
+Please read the Windows documentation for more details:
+
+* [Install WSL2]
+* [Install PostgreSQL in WSL2]
+
+[Install PostgreSQL in WSL2]: https://learn.microsoft.com/windows/wsl/tutorials/wsl-database#install-postgresql
+[Install WSL2]: https://learn.microsoft.com/windows/wsl/install
 
 Install in the cloud
 ------------------------------------------------------------------------------
@@ -357,12 +420,14 @@ PostgreSQL Anonymizer:
 
 * [Crunchy Bridge]
 * [Google Cloud SQL]
+* [Microsoft Azure Database]
 * [Neon]
 * [Postgres.ai]
 * [Tembo]
 
 [Crunchy Bridge]: https://access.crunchydata.com/documentation/postgresql-anonymizer/latest/
 [Google Cloud SQL]: https://cloud.google.com/sql/docs/postgres/extensions#postgresql_anonymizer
+[Microsoft Azure Database]: https://learn.microsoft.com/fr-fr/azure/postgresql/flexible-server/concepts-extensions
 [Neon]: https://neon.tech/blog/easily-anonymize-production-data-in-postgres
 [Postgres.ai]: https://postgres.ai/docs/database-lab/masking
 [Tembo]: https://tembo.io/blog/anon-dump
@@ -372,7 +437,7 @@ might have a platform-specific install procedure.
 
 If your favorite DBaaS provider is not present in the list above, there is not
 much we can do about it... Although we have open discussions with some major
-actors in this domain, we DO NOT have internal knowledge on wether or not they
+actors in this domain, we DO NOT have internal knowledge on whether or not they
 will support it in the near future. If privacy and anonymity are a concern to
 you, we encourage you to contact the customer service of these platforms and
 ask them directly if they plan to add this extension to their catalog.

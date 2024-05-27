@@ -14,7 +14,7 @@ REVOKE ALL ON SCHEMA anon FROM PUBLIC;
 REVOKE ALL ON ALL TABLES IN SCHEMA anon FROM PUBLIC;
 -- ...except calling the functions
 GRANT USAGE ON SCHEMA anon TO PUBLIC;
--- other priviledge will be granted below on a case-by-case basis
+-- other privileges will be granted below on a case-by-case basis
 
 
 --
@@ -33,9 +33,9 @@ SECURITY LABEL FOR anon ON SCHEMA anon IS 'TRUSTED';
 
 --
 -- This extension will create views based on masking functions. These functions
--- will be run as with priviledges of the owners of the views. This is prone
--- to search_path attacks: an untrusted user may be able to overide some
--- functions and gain superuser priviledges.
+-- will be run as with privileges of the owners of the views. This is prone
+-- to search_path attacks: an untrusted user may be able to override some
+-- functions and gain superuser privileges.
 --
 -- Therefore all functions should be defined with `SET search_path=''` even if
 -- they are not SECURITY DEFINER.
@@ -715,7 +715,7 @@ RETURNS TABLE (
 AS $$
 BEGIN
   IF not anon.is_initialized() THEN
-    RAISE NOTICE 'The dictionnary of identifiers is not present.'
+    RAISE NOTICE 'The dictionary of identifiers is not present.'
       USING HINT = 'You probably need to run ''SELECT anon.init()'' ';
   END IF;
 
@@ -1054,7 +1054,7 @@ $$
 --
 -- Return a hash value for a seed
 --
--- The function is a SECURIY DEFINER because `anon.salt` and `anon.algorithm`
+-- The function is a SECURITY DEFINER because `anon.salt` and `anon.algorithm`
 -- are visible only to superusers.
 --
 CREATE OR REPLACE FUNCTION anon.hash(
@@ -1080,19 +1080,15 @@ $$
 -- Random Generic Data
 -------------------------------------------------------------------------------
 
+-- The random functions are written in Rust (see `src/random.rs`)
+
+-- Undocumented and kept for backward compatibility with v1
 CREATE OR REPLACE FUNCTION anon.random_string(
   l integer
 )
 RETURNS text
 AS $$
-  SELECT array_to_string(
-    array(
-        select substr('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
-                      ((random()*(36-1)+1)::integer)
-                      ,1)
-        from generate_series(1,l)
-    ),''
-  );
+  SELECT anon.random_string(pg_catalog.int4range(1,l+1));
 $$
   LANGUAGE SQL
   VOLATILE
@@ -1102,196 +1098,27 @@ $$
   SET search_path=''
 ;
 
--- Zip code
-CREATE OR REPLACE FUNCTION anon.random_zip()
-RETURNS text
-AS $$
-  SELECT array_to_string(
-         array(
-                select substr('0123456789',((random()*(10-1)+1)::integer),1)
-                from generate_series(1,5)
-            ),''
-          );
-$$
-  LANGUAGE SQL
-  VOLATILE
-  RETURNS NULL ON NULL INPUT
-  PARALLEL RESTRICTED -- because random
-  SECURITY INVOKER
-  SET search_path=''
-;
-
-
--- range
-
-CREATE OR REPLACE FUNCTION anon.random_in_daterange(
-  r DATERANGE
-)
-RETURNS DATE
-AS $$
-  SELECT CAST(
-      (random()*(upper(r)::TIMESTAMP-lower(r)::TIMESTAMP))::INTERVAL
-      +lower(r)
-      AS DATE
-  );
-$$
-  LANGUAGE SQL
-  VOLATILE
-  RETURNS NULL ON NULL INPUT
-  PARALLEL RESTRICTED -- because random
-  SECURITY INVOKER
-  SET search_path=''
-;
-
-CREATE OR REPLACE FUNCTION anon.random_in_int4range(
-  r INT4RANGE
-)
-RETURNS INT
-AS $$
-  -- PG12 does not automatically cast the double precision result to INT)
-  SELECT CAST( (random()*(upper(r)-lower(r)-1))+lower(r) AS INT);
-$$
-  LANGUAGE SQL
-  VOLATILE
-  RETURNS NULL ON NULL INPUT
-  PARALLEL RESTRICTED -- because random
-  SECURITY INVOKER
-  SET search_path=''
-;
-
-CREATE OR REPLACE FUNCTION anon.random_in_int8range(
-  r INT8RANGE
-)
-RETURNS BIGINT
-AS $$
-  SELECT CAST( (random()*(upper(r)-lower(r)-1))+lower(r) AS BIGINT);
-$$
-  LANGUAGE SQL
-  VOLATILE
-  RETURNS NULL ON NULL INPUT
-  PARALLEL RESTRICTED -- because random
-  SECURITY INVOKER
-  SET search_path=''
-;
-
-CREATE OR REPLACE FUNCTION anon.random_in_numrange(
-  r NUMRANGE
-)
-RETURNS NUMERIC
-AS $$
-  SELECT CAST( (random()*(upper(r)-lower(r)))+lower(r) AS NUMERIC);
-$$
-  LANGUAGE SQL
-  VOLATILE
-  RETURNS NULL ON NULL INPUT
-  PARALLEL RESTRICTED -- because random
-  SECURITY INVOKER
-  SET search_path=''
-;
-
-
-CREATE OR REPLACE FUNCTION anon.random_in_tsrange(
-  r TSRANGE
-)
-RETURNS TIMESTAMP WITHOUT TIME ZONE
-AS $$
-  SELECT  CAST( (random()*(upper(r)-lower(r)))::INTERVAL+lower(r)
-          AS TIMESTAMP WITHOUT TIME ZONE);
-$$
-  LANGUAGE SQL
-  VOLATILE
-  RETURNS NULL ON NULL INPUT
-  PARALLEL RESTRICTED -- because random
-  SECURITY INVOKER
-  SET search_path=''
-;
-
-CREATE OR REPLACE FUNCTION anon.random_in_tstzrange(
-  r TSTZRANGE
-)
-RETURNS TIMESTAMP WITH TIME ZONE
-AS $$
-  SELECT  CAST( (random()*(upper(r)-lower(r)))::INTERVAL+lower(r)
-          AS TIMESTAMP WITH TIME ZONE);
-$$
-  LANGUAGE SQL
-  VOLATILE
-  RETURNS NULL ON NULL INPUT
-  PARALLEL RESTRICTED -- because random
-  SECURITY INVOKER
-  SET search_path=''
-;
-
-
--- date
-
-CREATE OR REPLACE FUNCTION anon.random_date_between(
-  date_start timestamp WITH TIME ZONE,
-  date_end timestamp WITH TIME ZONE
-)
-RETURNS timestamp WITH TIME ZONE AS $$
-    SELECT (random()*(date_end-date_start))::interval+date_start;
-$$
-  LANGUAGE SQL
-  VOLATILE
-  RETURNS NULL ON NULL INPUT
-  PARALLEL RESTRICTED -- because random
-  SECURITY INVOKER
-  SET search_path=''
-;
-
-CREATE OR REPLACE FUNCTION anon.random_date()
-RETURNS timestamp with time zone AS $$
-  SELECT anon.random_date_between('1900-01-01'::timestamp with time zone,now());
-$$
-  LANGUAGE SQL
-  VOLATILE
-  RETURNS NULL ON NULL INPUT
-  PARALLEL RESTRICTED -- because random
-  SECURITY INVOKER
-  SET search_path=''
-;
-
-
--- integer
-
-CREATE OR REPLACE FUNCTION anon.random_int_between(
-  int_start INTEGER,
-  int_stop INTEGER
-)
-RETURNS INTEGER AS $$
-    SELECT CAST ( random()*(int_stop-int_start)+int_start AS INTEGER );
-$$
-  LANGUAGE SQL
-  VOLATILE
-  RETURNS NULL ON NULL INPUT
-  PARALLEL RESTRICTED -- because random
-  SECURITY INVOKER
-  SET search_path=''
-;
-
-CREATE OR REPLACE FUNCTION anon.random_bigint_between(
-  int_start BIGINT,
-  int_stop BIGINT
-)
-RETURNS BIGINT AS $$
-    SELECT CAST ( random()*(int_stop-int_start)+int_start AS BIGINT );
-$$
-  LANGUAGE SQL
-  VOLATILE
-  RETURNS NULL ON NULL INPUT
-  PARALLEL RESTRICTED -- because random
-  SECURITY INVOKER
-  SET search_path=''
-;
-
+-- Undocumented and kept for backward compatibility with v1
 CREATE OR REPLACE FUNCTION anon.random_phone(
-  phone_prefix TEXT DEFAULT '0'
+  prefix TEXT
 )
 RETURNS TEXT AS $$
-  SELECT  phone_prefix
-          || CAST(anon.random_int_between(100000000,999999999) AS TEXT)
-          AS "phone";
+  SELECT  anon.random_number_with_format(prefix||'#########');
+$$
+  LANGUAGE SQL
+  VOLATILE
+  RETURNS NULL ON NULL INPUT
+  PARALLEL RESTRICTED -- because random
+  SECURITY INVOKER
+  SET search_path=''
+;
+
+-- Undocumented and kept for backward compatibility with v1
+CREATE OR REPLACE FUNCTION anon.plop(
+  prefix TEXT
+)
+RETURNS TEXT AS $$
+  SELECT  anon.random_number_with_format(prefix||'#########');
 $$
   LANGUAGE SQL
   VOLATILE
@@ -1682,7 +1509,7 @@ $$
 
 
 --
--- the pseudo function are declared as SECURTY DEFINER because the access
+-- the pseudo function are declared as SECURITY DEFINER because the access
 -- the anon.salt which is only visible to superusers.
 --
 -- If a masked role can read the salt, he/she can run a brute force attack to
@@ -1878,7 +1705,7 @@ $$
 ;
 
 --
--- partial_email('daamien@gmail.com') will becomme 'da******@gm******.com'
+-- partial_email('daamien@gmail.com') will become 'da******@gm******.com'
 --
 CREATE OR REPLACE FUNCTION anon.partial_email(
   ov TEXT
@@ -2064,7 +1891,7 @@ SELECT
   COALESCE(masking_function,masking_value) AS masking_filter,
   (
     -- Aggregate with count and bool_and to handle the cases
-    -- when the schema is not delared
+    -- when the schema is not declared
     SELECT COUNT(label)>0 and bool_and(label='TRUSTED')
     FROM pg_seclabel sl,
          anon.get_function_schema(masking_function) f("schema")
@@ -2144,7 +1971,7 @@ SELECT * FROM anon.pg_masking_rules
 -- Static Masking
 -------------------------------------------------------------------------------
 
--- Return SQL assigment which replace masked data in a column or null when no masking rule was found
+-- Return SQL assignment which replace masked data in a column or null when no masking rule was found
 CREATE OR REPLACE FUNCTION anon.build_anonymize_column_assignment(
   tablename REGCLASS,
   colname NAME
@@ -2514,7 +2341,7 @@ BEGIN
   IF NOT autoload THEN
     RAISE DEBUG 'Autoload is disabled.';
   ELSEIF r.init THEN
-    RAISE DEBUG 'Anon extension is already initiliazed.';
+    RAISE DEBUG 'Anon extension is already initialized.';
   ELSE
     PERFORM anon.init();
   END IF;
@@ -2643,10 +2470,10 @@ CREATE OR REPLACE FUNCTION anon.unmask_role(
 RETURNS BOOLEAN AS
 $$
 BEGIN
-  -- we dont know what priviledges this role had before putting his mask on
-  -- so we keep most of the priviledges as they are and let the
+  -- we dont know what privileges this role had before putting his mask on
+  -- so we keep most of the privileges as they are and let the
   -- administrator restore the correct access right.
-  RAISE NOTICE 'The previous priviledges of ''%'' are not restored. You need to grant them manually.', maskedrole;
+  RAISE NOTICE 'The previous privileges of ''%'' are not restored. You need to grant them manually.', maskedrole;
   -- restore default search_path
   EXECUTE format('ALTER ROLE %s RESET search_path;', maskedrole);
   RETURN TRUE;
@@ -2677,7 +2504,7 @@ BEGIN
   -- using a basic CREATE RULE statement. Placing a masking rule on a view is
   -- not supported, however a very stubborn user could try to create a table,
   -- put a mask on it and then transform the table into a view. In that case,
-  -- the mask_update process is stopped immediatly
+  -- the mask_update process is stopped immediately
   --
   -- https://github.com/postgres/postgres/commit/b23cd185fd5410e5204683933f848d4583e34b35
   --

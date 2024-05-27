@@ -9,7 +9,7 @@ PGRX?=cargo pgrx
 PGVER?=$(shell grep 'default = \[".*\"]' Cargo.toml | sed -e 's/.*\["//' | sed -e 's/"].*//')
 PG_MAJOR_VERSION=$(PGVER:pg%=%)
 
-# use `TARGET=debug make run` for more detailled errors
+# use `TARGET=debug make run` for more detailed errors
 TARGET?=release
 TARGET_DIR?=target/$(TARGET)/anon-$(PGVER)/
 PG_CONFIG?=`$(PGRX) info pg-config $(PGVER)`
@@ -41,7 +41,7 @@ REGRESS_TESTS+= get_function_schema trusted_schemas
 REGRESS_TESTS+= copy pg_dump
 REGRESS_TESTS+= masking_expressions
 REGRESS_TESTS+= sampling
-REGRESS_TESTS+= destruction random faking partial
+REGRESS_TESTS+= destruction random dummy faking partial
 REGRESS_TESTS+= pseudonymization hashing dynamic_masking
 REGRESS_TESTS+= anon_catalog anonymize privacy_by_default
 #REGRESS_TESTS+= restore
@@ -78,7 +78,7 @@ install:
 ##
 ## INSTALLCHECK
 ##
-## These are the functionnal tests, the unit tests are run with Cargo
+## These are the functional tests, the unit tests are run with Cargo
 ##
 
 installcheck:
