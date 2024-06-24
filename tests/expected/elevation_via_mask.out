@@ -43,14 +43,12 @@ SELECT pg_has_role('postgres','MEMBER') IS FALSE;
 SAVEPOINT elevate_1;
 SECURITY LABEL FOR anon ON COLUMN employee.ssn
 IS 'MASKED WITH FUNCTION pg_catalog.upper(public.elevate()::text)';
-ERROR:  'MASKED WITH FUNCTION pg_catalog.upper(public.elevate()::text)' is not a valid label for a column
-DETAIL:  At least one function belongs in an untrusted schema
+ERROR:  'MASKED WITH FUNCTION pg_catalog.upper(public.elevate()::text)' is not a valid masking function
 ROLLBACK TO elevate_1;
 SAVEPOINT elevate_2;
 SECURITY LABEL FOR anon ON COLUMN employee.ssn
 IS 'MASKED WITH VALUE public.elevate()::text';
-ERROR:  'MASKED WITH VALUE public.elevate()::text' is not a valid label for a column
-DETAIL:  Expression is invalid
+ERROR:  'MASKED WITH VALUE public.elevate()::text' is not a valid masking value
 ROLLBACK TO elevate_2;
 SELECT pg_has_role('postgres','MEMBER') IS FALSE;
  ?column? 
