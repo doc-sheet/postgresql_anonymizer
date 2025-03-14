@@ -43,7 +43,31 @@ REGRESS_TESTS+= hasmask masked_roles masking masking_search_path masking_foreign
 REGRESS_TESTS+= generalization k_anonymity
 REGRESS_TESTS+= permissions_owner permissions_masked_role injection syntax_checks
 REGRESS_TESTS+= views
+REGRESS_TESTS+= elevation_via_mask
+
+# We try our best to write tests that produce the same output on all the 5
+# current Postgres major versions. But sometimes it's really hard to do and
+# we generally prefer simplicity over complex output manipulation tricks.
+#
+# In these few special cases, we use conditional tests with the following
+# naming rules:
+# * the _PG15+ suffix means PostgreSQL 15 and all the major versions after
+# * the _PG13- suffix means PostgreSQL 13 and all the major versions below
+
+REGRESS_TESTS_PG12 = elevation_via_rule_PG15-
+REGRESS_TESTS_PG13 = elevation_via_rule_PG15-
+REGRESS_TESTS_PG14 = elevation_via_rule_PG15-
+REGRESS_TESTS_PG15 = elevation_via_rule_PG15-
+REGRESS_TESTS_PG16 =
+REGRESS_TESTS_PG17 =
+
+REGRESS_TESTS+=${REGRESS_TESTS_PG${PG_MAJOR_VERSION}}
+
 REGRESS_TESTS+=$(PG_TEST_EXTRA)
+
+
+
+
 # This can be overridden by an env variable
 REGRESS?=$(REGRESS_TESTS)
 MODULEDIR=extension/anon
